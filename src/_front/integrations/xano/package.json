@@ -1,0 +1,6 @@
+{
+    "name": "@weweb/front-integration-xano",
+    "dependencies": {
+        "@xano/js-sdk": "3.0.1"
+    }
+}
