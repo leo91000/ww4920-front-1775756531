@@ -2,6 +2,7 @@ import { executeCode, getValue as _getValue } from '@/_common/helpers/code/custo
 import { executeComponentAction } from '@/_common/use/useActions.js';
 import { detectInfinityLoop } from '@/_common/helpers/code/workflowsCallstack.js';
 import { applyVariableUpdate } from '@/_common/helpers/updateVariable.js';
+import { getFrontWorkflowCapabilities } from '@/_common/helpers/workflowVersion';
 import { set } from 'lodash';
 import { unref } from 'vue';
 import { useVariablesStore } from '@/pinia/variables.js';
@@ -13,8 +14,6 @@ import integrationsCore from '@/_front/integrations/index.js';
 import { useIntegrationsStore } from '@/pinia/integrations.js';
 import { useBackAuthStore } from '@/pinia/backAuth';
  
-const getValue = (rawValue, context, options = {}) => _getValue(rawValue, context, { ...options, throwError: true });
-
 export async function executeWorkflow(
     workflow,
     { context = {}, event = {}, callstack = [], isError, executionContext = {}, internal } = {}
@@ -215,6 +214,12 @@ export async function executeWorkflowAction(
 
     const action = workflow.actions[actionId];
     if (!action) return { result };
+    const workflowCapabilities = getFrontWorkflowCapabilities(workflow);
+    const getValue = (rawValue, localContext = context, options = {}) =>
+        _getValue(rawValue, localContext, {
+            ...options,
+            throwError: workflowCapabilities.throwOnConfigFormulaError,
+        });
 
     function logActionInformation(type, log, meta = {}) {
         if (fromFunction) return;
@@ -282,16 +287,11 @@ export async function executeWorkflowAction(
                     }
                     if (!currentVar) throw new Error('Workflow variable not found. Create it first.');
 
-                    const newValue = applyVariableUpdate(
-                        { type: currentVar.type },
-                        currentVar.value,
-                        value,
-                        {
-                            path,
-                            index,
-                            arrayUpdateType: action.arrayUpdateType,
-                        }
-                    );
+                    const newValue = applyVariableUpdate({ type: currentVar.type }, currentVar.value, value, {
+                        path,
+                        index,
+                        arrayUpdateType: action.arrayUpdateType,
+                    });
 
                     if (internal) {
                         set(
@@ -490,7 +490,7 @@ export async function executeWorkflowAction(
 
                 const backTableViewsStore = useBackTableViewsStore(wwLib.$pinia);
 
-                result = await backTableViewsStore.fetchData(action.tableViewId, {
+                await backTableViewsStore.fetchData(action.tableViewId, {
                     parameters: {
                         offset: getValue(action.offset, context, { event }),
                         limit: getValue(action.limit, context, { event }),
@@ -505,7 +505,7 @@ export async function executeWorkflowAction(
 
                 const backTableViewsStore = useBackTableViewsStore(wwLib.$pinia);
 
-                result = await backTableViewsStore.fetchData(action.tableViewId, {
+                await backTableViewsStore.fetchData(action.tableViewId, {
                     parameters: {
                         ...backTableViewsStore.latestFetchParameters[action.tableViewId],
                         limit: getValue(action.limit, context, { event }),
@@ -523,7 +523,7 @@ export async function executeWorkflowAction(
                 const nextOffset = backTableViewsStore.data[action.tableViewId]?.metadata?.nextOffset;
                 if (!nextOffset) throw new Error('No more data to load.');
 
-                result = await backTableViewsStore.fetchData(action.tableViewId, {
+                await backTableViewsStore.fetchData(action.tableViewId, {
                     parameters: {
                         ...backTableViewsStore.latestFetchParameters[action.tableViewId],
                         limit: getValue(action.limit, context, { event }),
@@ -809,8 +809,8 @@ export async function executeWorkflowAction(
                         ? context?.component?.variables[action.args.varId]
                         : variablesStore.values[action.args.varId]
                     : isMultiple
-                    ? getValue(action.args.varId, context, { event })
-                    : [getValue(action.args.varId, context, { event })];
+                      ? getValue(action.args.varId, context, { event })
+                      : [getValue(action.args.varId, context, { event })];
 
                 if (isVariable) {
                     if (!fileVariable) throw new Error('File Element not found.');

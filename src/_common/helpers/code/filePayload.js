@@ -1,4 +1,5 @@
 function getPrototypeName(value) {
+    if (value === null || value === undefined) return undefined;
     return Object.getPrototypeOf(value)?.constructor?.name;
 }
 

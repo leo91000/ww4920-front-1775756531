@@ -1,6 +1,7 @@
  import { useVariablesStore } from '@/pinia/variables.js';
 import { buildEditorRequestHeaders, buildRequestPayload, requestWithOptionalSSE } from './editorRequests.ts';
 import { isFile, normalizeFiles } from './filePayload.js';
+import { getValue } from './customCode.js';
 
 export function getServerUrl() {
      return `${window.location.origin}/`;
@@ -118,6 +119,72 @@ function resolveParameterVariableReferences(parameters = {}, parameterNames = []
             : variablesStore.values[value];
         if (!resolvedValue) continue;
         resolvedParameters[key] = resolvedValue;
+    }
+
+    return resolvedParameters;
+}
+
+function resolveEditorWorkflowParameters(parameters = {}, fileParameters = [], fileMetaParameters = [], context = {}) {
+    const variablesStore = useVariablesStore(wwLib.$pinia);
+    const resolvedParameters = { ...parameters };
+
+    for (const fileParam of [...fileParameters, ...fileMetaParameters]) {
+        if (!Object.hasOwn(resolvedParameters, fileParam.name)) continue;
+
+        if (
+            typeof resolvedParameters[fileParam.name] === 'string' &&
+            resolvedParameters[fileParam.name].match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i)
+        ) {
+            const id = resolvedParameters[fileParam.name];
+            const isInternalVariable = context?.component?.componentVariablesConfiguration?.[id];
+            const actionValue = isInternalVariable ? context?.component?.variables[id] : variablesStore.values[id];
+            if (actionValue) {
+                resolvedParameters[fileParam.name] = actionValue;
+            }
+        }
+
+        if (!fileParam.multiple && Array.isArray(resolvedParameters[fileParam.name])) {
+            resolvedParameters[fileParam.name] = resolvedParameters[fileParam.name][0];
+        }
+    }
+
+    for (const fileMetaParam of fileMetaParameters) {
+        if (fileMetaParam.multiple) {
+            resolvedParameters[fileMetaParam.name] = resolvedParameters[fileMetaParam.name]?.map(file => ({
+                size: file?.size,
+                type: file?.type,
+                name: file?.name,
+                lastModified: file?.lastModified,
+            }));
+        } else if (Array.isArray(resolvedParameters[fileMetaParam.name])) {
+            const [file] = resolvedParameters[fileMetaParam.name];
+            resolvedParameters[fileMetaParam.name] = file
+                ? {
+                      size: file.size,
+                      type: file.type,
+                      name: file.name,
+                      lastModified: file.lastModified,
+                  }
+                : undefined;
+        } else if (resolvedParameters[fileMetaParam.name]) {
+            resolvedParameters[fileMetaParam.name] = {
+                size: resolvedParameters[fileMetaParam.name].size,
+                type: resolvedParameters[fileMetaParam.name].type,
+                name: resolvedParameters[fileMetaParam.name].name,
+                lastModified: resolvedParameters[fileMetaParam.name].lastModified,
+            };
+        }
+    }
+
+    return resolvedParameters;
+}
+
+function resolveEditorTestParameters(parameters = {}, workflowParameters = []) {
+    const resolvedParameters = { ...parameters };
+
+    for (const parameter of Object.values(workflowParameters || {})) {
+        if (!parameter?.name || !Object.hasOwn(resolvedParameters, parameter.name)) continue;
+        resolvedParameters[parameter.name] = getValue(resolvedParameters[parameter.name]);
     }
 
     return resolvedParameters;

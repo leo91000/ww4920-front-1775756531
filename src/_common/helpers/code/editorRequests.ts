@@ -16,11 +16,13 @@ export function buildEditorRequestHeaders({
     headers = {},
     actionId = null,
     encodedPreviousResults = null,
+    env = null,
 }: {
     isTest?: boolean;
     headers?: RequestHeaders;
     actionId?: string | null;
     encodedPreviousResults?: string | null;
+    env?: string | null;
 } = {}) {
     const baseHeaders: RequestHeaders = {
         'ww-socket-id': wwLib.$socket?.id,
@@ -28,6 +30,7 @@ export function buildEditorRequestHeaders({
         'ww-editor-test': isTest ? 'true' : 'false',
         ...(actionId ? { 'ww-editor-action-id': actionId } : {}),
         ...(encodedPreviousResults ? { 'ww-editor-previous-results': encodedPreviousResults } : {}),
+        ...(env ? { 'ww-editor-env': env } : {}),
         ...headers,
     };
 

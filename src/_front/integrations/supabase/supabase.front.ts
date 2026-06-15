@@ -8,6 +8,35 @@ function formatSession(session) {
     return _session;
 }
 
+function buildSelectString(columns: any, joinTypes: any = {}): string {
+    if (!columns || columns === '*') return '*';
+    if (Array.isArray(columns)) return columns.join(', ') || '*';
+
+    const rootCols: string[] = [];
+    const joinFragments: string[] = [];
+
+    for (const [key, val] of Object.entries(columns)) {
+        if (key === '*') { rootCols.push('*'); continue; }
+
+        if (val === true) {
+            rootCols.push(key);
+        } else if (typeof val === 'object' && val !== null) {
+            const nestedVal = (val as any).$value || val;
+            let colStr = '*';
+            if (nestedVal && typeof nestedVal === 'object') {
+                const nestedCols = Object.keys(nestedVal).filter(k => k !== '$alias' && k !== '$value');
+                colStr = nestedCols.length ? nestedCols.join(', ') : '*';
+            }
+
+            const tableName = key.includes('__') ? key.split('__')[0] : key;
+            const hint = joinTypes[key] === 'inner' ? '!inner' : '';
+            joinFragments.push(`${tableName}${hint}(${colStr})`);
+        }
+    }
+
+    return [...rootCols, ...joinFragments].join(', ') || '*';
+}
+
 function applyFilters(query, filters) {
     if (!filters?.length) return query;
 
@@ -32,6 +61,72 @@ function applyFilters(query, filters) {
             query = query.is(column, value);
         } else if (column && value !== undefined && value !== '') {
             query = query[fn](column, value);
+        }
+    }
+
+    return query;
+}
+
+const POSTGREST_OP_OVERRIDES: Record<string, string> = {
+    contains: 'cs', containedBy: 'cd', overlaps: 'ov', textSearch: 'fts',
+};
+
+function conditionToPostgrest(c: any): string | null {
+    const { operator, value } = c;
+    const column = Array.isArray(c.field) ? c.field.join('.') : c.field;
+    if (!column || !operator || value === undefined || value === '') return null;
+    if (c.isEmptyIgnored && value === null) return null;
+
+    const op = POSTGREST_OP_OVERRIDES[operator] || operator;
+
+    if (operator === 'in') {
+        const vals = Array.isArray(value) ? value.join(',') : String(value);
+        return `${column}.in.(${vals})`;
+    }
+    if (operator === 'contains' || operator === 'containedBy' || operator === 'overlaps') {
+        const vals = Array.isArray(value) ? value.join(',') : String(value);
+        return `${column}.${op}.{${vals}}`;
+    }
+    if (operator === 'textSearch') {
+        return `${column}.fts.${value}`;
+    }
+
+    return `${column}.${op}.${value}`;
+}
+
+function groupToPostgrest(group: any): string {
+    const parts = (group.conditions || [])
+        .map((c: any) => c.link ? groupToPostgrest(c) : conditionToPostgrest(c))
+        .filter(Boolean);
+
+    if (group.link === '$or') return parts.join(',');
+    return parts.length > 1 ? `and(${parts.join(',')})` : parts[0] || '';
+}
+
+function applyDataFilter(query: any, filter: any): any {
+    if (!filter?.conditions?.length) return query;
+
+    if (filter.link === '$or') {
+        const expr = groupToPostgrest(filter);
+        if (expr) query = query.or(expr);
+    } else {
+        for (const condition of filter.conditions) {
+            if (condition.link) {
+                if (condition.link === '$or') {
+                    const expr = groupToPostgrest(condition);
+                    if (expr) query = query.or(expr);
+                } else {
+                    query = applyDataFilter(query, condition);
+                }
+            } else {
+                const { operator, value } = condition;
+                const column = Array.isArray(condition.field) ? condition.field.join('.') : condition.field;
+                if (!column || !operator) continue;
+                if (value === undefined || value === '') continue;
+                if (condition.isEmptyIgnored && value === null) continue;
+
+                query = query[operator](column, value);
+            }
         }
     }
 
@@ -90,15 +185,21 @@ export default {
         processedViewConfig.offset = parameters?.offset ?? processedViewConfig.offset ?? 0;
         processedViewConfig.limit = parameters?.limit ?? processedViewConfig.limit;
 
-        const selectColumns = processedViewConfig.columns?.length ? processedViewConfig.columns.join(',') : '*';
+        const selectString = buildSelectString(processedViewConfig.columns, processedViewConfig.joinTypes);
         let query = instance
             .from(tableConfig.table)
-            .select(selectColumns, { count: processedViewConfig.count ?? 'exact' });
-        if (processedViewConfig.filters?.length) query = applyFilters(query, processedViewConfig.filters);
+            .select(selectString, { count: processedViewConfig.count ?? 'exact' });
 
-        const orderColumn = processedViewConfig.orderBy || processedViewConfig.sort?.column;
-        const orderDirection = processedViewConfig.orderDirection || processedViewConfig.sort?.direction;
-        if (orderColumn) query = query.order(orderColumn, { ascending: orderDirection !== 'desc' });
+        if (processedViewConfig.filters?.link) {
+            query = applyDataFilter(query, processedViewConfig.filters);
+        } else if (processedViewConfig.filters?.length) {
+            query = applyFilters(query, processedViewConfig.filters);
+        }
+
+        for (const item of processedViewConfig.sort || []) {
+            const column = Array.isArray(item.field) ? item.field.join('.') : item.field;
+            if (column) query = query.order(column, { ascending: item.direction !== 'DESC' });
+        }
 
         if (processedViewConfig.limit) query = query.limit(processedViewConfig.limit);
         if (processedViewConfig.offset && processedViewConfig.limit)
@@ -133,16 +234,21 @@ export default {
         select: async ({ args }, { instance }: { instance: SupabaseClient }) => {
             if (!instance) throw new Error('Supabase instance is required');
 
-            const selectColumns = (args.columns || []).join(',') || '*';
-            let query = instance.from(args.table).select(selectColumns, args.count ? { count: args.count } : {});
-            query = applyFilters(query, args.filters);
-            if (args.orderBy) query = query.order(args.orderBy, { ascending: args.orderAscending });
+            const selectString = buildSelectString(args.columns, args.joinTypes);
+            let query = instance.from(args.table).select(selectString, args.count ? { count: args.count } : {});
+
+            query = applyDataFilter(query, args.filters);
+
+            for (const item of args.sort || []) {
+                const column = Array.isArray(item.field) ? item.field.join('.') : item.field;
+                if (column) query = query.order(column, { ascending: item.direction !== 'DESC' });
+            }
             if (args.limit && args.offset) query = query.range(args.offset, args.offset + args.limit - 1);
             else if (args.limit) query = query.limit(args.limit);
             if (args.single) query = query.single() as any;
             else if (args.maybeSingle) query = query.maybeSingle() as any;
-            const { data, error, count } = await query;
 
+            const { data, error, count } = await query;
             if (error) throw error;
             return args.count ? { data, count } : data;
         },
@@ -160,7 +266,7 @@ export default {
 
             const selectColumns = (args.returnColumns || []).join(',') || '*';
             let query = instance.from(args.table).update(args.data);
-            query = applyFilters(query, args.filters);
+            query = applyDataFilter(query, args.filters);
             const { data, error, count } = await query.select(selectColumns);
 
             if (error) throw error;
@@ -186,7 +292,7 @@ export default {
 
             const selectColumns = (args.returnColumns || []).join(',') || '*';
             let query = instance.from(args.table).delete();
-            query = applyFilters(query, args.filters);
+            query = applyDataFilter(query, args.filters);
             const { data, error } = await query.select(selectColumns);
 
             if (error) throw error;

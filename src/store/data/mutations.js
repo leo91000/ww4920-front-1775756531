@@ -83,6 +83,11 @@ export default {
         set(state.globalWorkflows, workflowData.id, workflowData);
     },
     setGlobalWorkflow(state, workflowData) {
+        const currentWorkflow = state.globalWorkflows[workflowData.id];
+        if (currentWorkflow?.version !== undefined && workflowData.version === undefined) {
+            set(state.globalWorkflows, workflowData.id, { ...workflowData, version: currentWorkflow.version });
+            return;
+        }
         set(state.globalWorkflows, workflowData.id, workflowData);
     },
     resetWorkflowsResult(state) {

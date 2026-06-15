@@ -1,4 +1,4 @@
-import { isObject } from 'lodash';
+import { get, isObject } from 'lodash';
 import { computed } from 'vue';
 import { isFile, isFileList } from '@/_common/helpers/code/filePayload.js';
 import { _wwFormulas } from '@/_common/helpers/code/wwFormulas';
@@ -257,8 +257,9 @@ export function sortData(data, sort, context, event, args, throwError = false) {
         for (const elem of computedSort) {
             let result = 0;
 
-            const _a = a?.[elem.key];
-            const _b = b?.[elem.key];
+            const path = elem?.field ?? elem?.key;
+            const _a = path ? get(a, path) : undefined;
+            const _b = path ? get(b, path) : undefined;
 
             let type = _a === null || _a === undefined ? (_b === null ? 'undefined' : typeof _b) : typeof _a;
             switch (type) {

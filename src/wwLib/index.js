@@ -4,7 +4,7 @@ import { useIconsStore } from '@/pinia/icons';
 
  /* wwFront:start */
 // eslint-disable-next-line no-undef
-;
+import plugin_2bd1c688_31c5_443e_ae25_59aa5b6431fb from '@/components/plugins/plugin-2bd1c688-31c5-443e-ae25-59aa5b6431fb/src/wwPlugin.js';
 /* wwFront:end */
 
 import { computed, reactive } from 'vue';
@@ -49,7 +49,7 @@ export default {
 
         /* wwFront:start */
         // eslint-disable-next-line no-undef
-        ;
+        wwLib.wwPluginHelper.registerPlugin('plugin-2bd1c688-31c5-443e-ae25-59aa5b6431fb', plugin_2bd1c688_31c5_443e_ae25_59aa5b6431fb);
         /* wwFront:end */
 
  

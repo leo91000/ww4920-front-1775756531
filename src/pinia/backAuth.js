@@ -30,9 +30,11 @@ export const useBackAuthStore = defineStore('backAuth', () => {
         }
         if (authIntegration.value) {
             try {
-                session.value = localStorage.getItem('ww-auth-session')
-                    ? JSON.parse(localStorage.getItem('ww-auth-session'))
-                    : undefined;
+                if (!session.value) {
+                    session.value = localStorage.getItem('ww-auth-session')
+                        ? JSON.parse(localStorage.getItem('ww-auth-session'))
+                        : undefined;
+                }
                 await hooksStore.executeHook('auth-refresh/integration:' + authIntegration.value, {
                     session: session.value,
                     connection: integrationsStore.getConnection(connectionId.value),
